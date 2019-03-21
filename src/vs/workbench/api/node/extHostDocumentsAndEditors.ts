@@ -2,37 +2,42 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
-import Event, { Emitter } from 'vs/base/common/event';
+import * as assert from 'vs/base/common/assert';
+import { Emitter, Event } from 'vs/base/common/event';
 import { dispose } from 'vs/base/common/lifecycle';
-import { MainContext, ExtHostDocumentsAndEditorsShape, IDocumentsAndEditorsDelta } from './extHost.protocol';
-import { ExtHostDocumentData } from './extHostDocumentData';
-import { ExtHostTextEditor } from './extHostTextEditor';
-import { IThreadService } from 'vs/workbench/services/thread/common/threadService';
-import * as assert from 'assert';
-import * as typeConverters from './extHostTypeConverters';
+import { URI } from 'vs/base/common/uri';
+import { ExtHostDocumentsAndEditorsShape, IDocumentsAndEditorsDelta, IMainContext, MainContext } from 'vs/workbench/api/common/extHost.protocol';
+import { ExtHostDocumentData } from 'vs/workbench/api/node/extHostDocumentData';
+import { ExtHostTextEditor } from 'vs/workbench/api/node/extHostTextEditor';
+import * as typeConverters from 'vs/workbench/api/node/extHostTypeConverters';
+import { Disposable } from 'vs/workbench/api/node/extHostTypes';
 
-export class ExtHostDocumentsAndEditors extends ExtHostDocumentsAndEditorsShape {
+export class ExtHostDocumentsAndEditors implements ExtHostDocumentsAndEditorsShape {
 
-	private _activeEditorId: string;
+	private _disposables: Disposable[] = [];
+
+	private _activeEditorId: string | null;
+
 	private readonly _editors = new Map<string, ExtHostTextEditor>();
 	private readonly _documents = new Map<string, ExtHostDocumentData>();
 
 	private readonly _onDidAddDocuments = new Emitter<ExtHostDocumentData[]>();
 	private readonly _onDidRemoveDocuments = new Emitter<ExtHostDocumentData[]>();
 	private readonly _onDidChangeVisibleTextEditors = new Emitter<ExtHostTextEditor[]>();
-	private readonly _onDidChangeActiveTextEditor = new Emitter<ExtHostTextEditor>();
+	private readonly _onDidChangeActiveTextEditor = new Emitter<ExtHostTextEditor | undefined>();
 
 	readonly onDidAddDocuments: Event<ExtHostDocumentData[]> = this._onDidAddDocuments.event;
 	readonly onDidRemoveDocuments: Event<ExtHostDocumentData[]> = this._onDidRemoveDocuments.event;
 	readonly onDidChangeVisibleTextEditors: Event<ExtHostTextEditor[]> = this._onDidChangeVisibleTextEditors.event;
-	readonly onDidChangeActiveTextEditor: Event<ExtHostTextEditor> = this._onDidChangeActiveTextEditor.event;
+	readonly onDidChangeActiveTextEditor: Event<ExtHostTextEditor | undefined> = this._onDidChangeActiveTextEditor.event;
 
 	constructor(
-		@IThreadService private _threadService: IThreadService
-	) {
-		super();
+		private readonly _mainContext: IMainContext,
+	) { }
+
+	dispose() {
+		this._disposables = dispose(this._disposables);
 	}
 
 	$acceptDocumentsAndEditorsDelta(delta: IDocumentsAndEditorsDelta): void {
@@ -42,27 +47,32 @@ export class ExtHostDocumentsAndEditors extends ExtHostDocumentsAndEditorsShape 
 		const removedEditors: ExtHostTextEditor[] = [];
 
 		if (delta.removedDocuments) {
-			for (const id of delta.removedDocuments) {
+			for (const uriComponent of delta.removedDocuments) {
+				const uri = URI.revive(uriComponent);
+				const id = uri.toString();
 				const data = this._documents.get(id);
 				this._documents.delete(id);
-				removedDocuments.push(data);
+				if (data) {
+					removedDocuments.push(data);
+				}
 			}
 		}
 
 		if (delta.addedDocuments) {
 			for (const data of delta.addedDocuments) {
-				assert.ok(!this._documents.has(data.url.toString()), `document '${data.url} already exists!'`);
+				const resource = URI.revive(data.uri);
+				assert.ok(!this._documents.has(resource.toString()), `document '${resource} already exists!'`);
 
 				const documentData = new ExtHostDocumentData(
-					this._threadService.get(MainContext.MainThreadDocuments),
-					data.url,
+					this._mainContext.getProxy(MainContext.MainThreadDocuments),
+					resource,
 					data.lines,
 					data.EOL,
 					data.modeId,
 					data.versionId,
 					data.isDirty
 				);
-				this._documents.set(data.url.toString(), documentData);
+				this._documents.set(resource.toString(), documentData);
 				addedDocuments.push(documentData);
 			}
 		}
@@ -71,23 +81,27 @@ export class ExtHostDocumentsAndEditors extends ExtHostDocumentsAndEditorsShape 
 			for (const id of delta.removedEditors) {
 				const editor = this._editors.get(id);
 				this._editors.delete(id);
-				removedEditors.push(editor);
+				if (editor) {
+					removedEditors.push(editor);
+				}
 			}
 		}
 
 		if (delta.addedEditors) {
 			for (const data of delta.addedEditors) {
-				assert.ok(this._documents.has(data.document.toString()), `document '${data.document}' does not exist`);
+				const resource = URI.revive(data.documentUri);
+				assert.ok(this._documents.has(resource.toString()), `document '${resource}' does not exist`);
 				assert.ok(!this._editors.has(data.id), `editor '${data.id}' already exists!`);
 
-				const documentData = this._documents.get(data.document.toString());
+				const documentData = this._documents.get(resource.toString())!;
 				const editor = new ExtHostTextEditor(
-					this._threadService.get(MainContext.MainThreadEditors),
+					this._mainContext.getProxy(MainContext.MainThreadTextEditors),
 					data.id,
 					documentData,
-					data.selections.map(typeConverters.toSelection),
+					data.selections.map(typeConverters.Selection.to),
 					data.options,
-					typeConverters.toViewColumn(data.editorPosition)
+					data.visibleRanges.map(range => typeConverters.Range.to(range)),
+					typeof data.editorPosition === 'number' ? typeConverters.ViewColumn.to(data.editorPosition) : undefined
 				);
 				this._editors.set(data.id, editor);
 			}
@@ -97,6 +111,9 @@ export class ExtHostDocumentsAndEditors extends ExtHostDocumentsAndEditorsShape 
 			assert.ok(delta.newActiveEditor === null || this._editors.has(delta.newActiveEditor), `active editor '${delta.newActiveEditor}' does not exist`);
 			this._activeEditorId = delta.newActiveEditor;
 		}
+
+		dispose(removedDocuments);
+		dispose(removedEditors);
 
 		// now that the internal state is complete, fire events
 		if (delta.removedDocuments) {
@@ -112,14 +129,10 @@ export class ExtHostDocumentsAndEditors extends ExtHostDocumentsAndEditorsShape 
 		if (delta.newActiveEditor !== undefined) {
 			this._onDidChangeActiveTextEditor.fire(this.activeEditor());
 		}
-
-		// now that the events are out, dispose removed documents and editors
-		dispose(removedDocuments);
-		dispose(removedEditors);
 	}
 
-	getDocument(strUrl: string): ExtHostDocumentData {
-		return this._documents.get(strUrl);
+	getDocument(uri: URI): ExtHostDocumentData | undefined {
+		return this._documents.get(uri.toString());
 	}
 
 	allDocuments(): ExtHostDocumentData[] {
@@ -128,7 +141,7 @@ export class ExtHostDocumentsAndEditors extends ExtHostDocumentsAndEditorsShape 
 		return result;
 	}
 
-	getEditor(id: string): ExtHostTextEditor {
+	getEditor(id: string): ExtHostTextEditor | undefined {
 		return this._editors.get(id);
 	}
 

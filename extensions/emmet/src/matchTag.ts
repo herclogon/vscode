@@ -4,21 +4,22 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import { getNode } from './util';
-import parse from '@emmetio/html-matcher';
-import Node from '@emmetio/node';
+import { HtmlNode } from 'EmmetNode';
+import { getHtmlNode, parseDocument, validate } from './util';
+
 
 export function matchTag() {
-	let editor = vscode.window.activeTextEditor;
-	if (!editor) {
-		vscode.window.showInformationMessage('No editor is active');
+	if (!validate(false) || !vscode.window.activeTextEditor) {
 		return;
 	}
 
-	let rootNode: Node = parse(editor.document.getText());
-	let updatedSelections = [];
+	const editor = vscode.window.activeTextEditor;
+	let rootNode: HtmlNode = <HtmlNode>parseDocument(editor.document);
+	if (!rootNode) { return; }
+
+	let updatedSelections: vscode.Selection[] = [];
 	editor.selections.forEach(selection => {
-		let updatedSelection = getUpdatedSelections(editor, editor.document.offsetAt(selection.start), rootNode);
+		let updatedSelection = getUpdatedSelections(editor, selection.start, rootNode);
 		if (updatedSelection) {
 			updatedSelections.push(updatedSelection);
 		}
@@ -29,22 +30,16 @@ export function matchTag() {
 	}
 }
 
-function getUpdatedSelections(editor: vscode.TextEditor, offset: number, rootNode: Node): vscode.Selection {
-	let currentNode = getNode(rootNode, offset, true);
+function getUpdatedSelections(editor: vscode.TextEditor, position: vscode.Position, rootNode: HtmlNode): vscode.Selection | undefined {
+	let currentNode = getHtmlNode(editor.document, rootNode, position, true);
+	if (!currentNode) { return; }
 
 	// If no closing tag or cursor is between open and close tag, then no-op
-	if (!currentNode.close || (currentNode.open.end < offset && currentNode.close.start > offset)) {
+	if (!currentNode.close || (position.isAfter(currentNode.open.end) && position.isBefore(currentNode.close.start))) {
 		return;
 	}
 
-	if (offset <= currentNode.open.end) {
-		let matchingPosition = editor.document.positionAt(currentNode.close.start);
-		return new vscode.Selection(matchingPosition, matchingPosition);
-	} else {
-		let matchingPosition = editor.document.positionAt(currentNode.open.start);
-		return new vscode.Selection(matchingPosition, matchingPosition);
-	}
-
+	// Place cursor inside the close tag if cursor is inside the open tag, else place it inside the open tag
+	let finalPosition = position.isBeforeOrEqual(currentNode.open.end) ? currentNode.close.start.translate(0, 2) : currentNode.open.start.translate(0, 1);
+	return new vscode.Selection(finalPosition, finalPosition);
 }
-
-

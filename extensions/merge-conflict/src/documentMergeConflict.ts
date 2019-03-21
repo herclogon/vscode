@@ -10,12 +10,14 @@ export class DocumentMergeConflict implements interfaces.IDocumentMergeConflict 
 	public range: vscode.Range;
 	public current: interfaces.IMergeRegion;
 	public incoming: interfaces.IMergeRegion;
+	public commonAncestors: interfaces.IMergeRegion[];
 	public splitter: vscode.Range;
 
-	constructor(document: vscode.TextDocument, descriptor: interfaces.IDocumentMergeConflictDescriptor) {
+	constructor(descriptor: interfaces.IDocumentMergeConflictDescriptor) {
 		this.range = descriptor.range;
 		this.current = descriptor.current;
 		this.incoming = descriptor.incoming;
+		this.commonAncestors = descriptor.commonAncestors;
 		this.splitter = descriptor.splitter;
 	}
 
@@ -25,7 +27,7 @@ export class DocumentMergeConflict implements interfaces.IDocumentMergeConflict 
 
 			this.applyEdit(type, editor, edit);
 			return Promise.resolve(true);
-		};
+		}
 
 		return editor.edit((edit) => this.applyEdit(type, editor, edit));
 	}

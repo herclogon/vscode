@@ -4,8 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import { EmmetCompletionItemProvider } from './emmetCompletionProvider';
-import { expandAbbreviation, wrapWithAbbreviation } from './abbreviationActions';
+import { DefaultCompletionItemProvider } from './defaultCompletionProvider';
+import { expandEmmetAbbreviation, wrapWithAbbreviation, wrapIndividualLinesWithAbbreviation } from './abbreviationActions';
 import { removeTag } from './removeTag';
 import { updateTag } from './updateTag';
 import { matchTag } from './matchTag';
@@ -15,98 +15,172 @@ import { mergeLines } from './mergeLines';
 import { toggleComment } from './toggleComment';
 import { fetchEditPoint } from './editPoint';
 import { fetchSelectItem } from './selectItem';
-
-interface ISupportedLanguageMode {
-	id: string;
-	triggerCharacters: string[];
-}
-
-const SUPPORTED_LANGUAGE_MODES: ISupportedLanguageMode[] = [
-	{ id: 'html', triggerCharacters: ['!', '.', '}'] },
-	{ id: 'jade', triggerCharacters: ['!', '.', '}'] },
-	{ id: 'slim', triggerCharacters: ['!', '.', '}'] },
-	{ id: 'haml', triggerCharacters: ['!', '.', '}'] },
-	{ id: 'xml', triggerCharacters: ['.', '}'] },
-	{ id: 'xsl', triggerCharacters: ['.', '}'] },
-
-	{ id: 'css', triggerCharacters: [':'] },
-	{ id: 'scss', triggerCharacters: [':'] },
-	{ id: 'sass', triggerCharacters: [':'] },
-	{ id: 'less', triggerCharacters: [':'] },
-	{ id: 'stylus', triggerCharacters: [':'] },
-
-	{ id: 'javascriptreact', triggerCharacters: ['.'] },
-	{ id: 'typescriptreact', triggerCharacters: ['.'] }
-];
+import { evaluateMathExpression } from './evaluateMathExpression';
+import { incrementDecrement } from './incrementDecrement';
+import { LANGUAGE_MODES, getMappingForIncludedLanguages, updateEmmetExtensionsPath } from './util';
+import { updateImageSize } from './updateImageSize';
+import { reflectCssValue } from './reflectCssValue';
 
 export function activate(context: vscode.ExtensionContext) {
-	let completionProvider = new EmmetCompletionItemProvider();
+	registerCompletionProviders(context);
 
-	for (let language of SUPPORTED_LANGUAGE_MODES) {
-		const selector: vscode.DocumentFilter = { language: language.id };
-		const provider = vscode.languages.registerCompletionItemProvider(selector, completionProvider, ...language.triggerCharacters);
-
-		context.subscriptions.push(provider);
-	}
-
-	context.subscriptions.push(vscode.commands.registerCommand('emmet.wrapWithAbbreviation', () => {
-		wrapWithAbbreviation();
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.wrapWithAbbreviation', (args) => {
+		wrapWithAbbreviation(args);
 	}));
 
-	context.subscriptions.push(vscode.commands.registerCommand('emmet.expandAbbreviation', () => {
-		expandAbbreviation();
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.wrapIndividualLinesWithAbbreviation', (args) => {
+		wrapIndividualLinesWithAbbreviation(args);
 	}));
 
-	context.subscriptions.push(vscode.commands.registerCommand('emmet.removeTag', () => {
-		removeTag();
+	context.subscriptions.push(vscode.commands.registerCommand('emmet.expandAbbreviation', (args) => {
+		expandEmmetAbbreviation(args);
 	}));
 
-	context.subscriptions.push(vscode.commands.registerCommand('emmet.updateTag', () => {
-		vscode.window.showInputBox({ prompt: 'Enter Tag' }).then(tagName => {
-			updateTag(tagName);
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.removeTag', () => {
+		return removeTag();
+	}));
+
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.updateTag', (inputTag) => {
+		if (inputTag && typeof inputTag === 'string') {
+			return updateTag(inputTag);
+		}
+		return vscode.window.showInputBox({ prompt: 'Enter Tag' }).then(tagName => {
+			if (tagName) {
+				const update = updateTag(tagName);
+				return update ? update : false;
+			}
+			return false;
 		});
 	}));
 
-	context.subscriptions.push(vscode.commands.registerCommand('emmet.matchTag', () => {
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.matchTag', () => {
 		matchTag();
 	}));
 
-	context.subscriptions.push(vscode.commands.registerCommand('emmet.balanceOut', () => {
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.balanceOut', () => {
 		balanceOut();
 	}));
 
-	context.subscriptions.push(vscode.commands.registerCommand('emmet.balanceIn', () => {
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.balanceIn', () => {
 		balanceIn();
 	}));
 
-	context.subscriptions.push(vscode.commands.registerCommand('emmet.splitJoinTag', () => {
-		splitJoinTag();
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.splitJoinTag', () => {
+		return splitJoinTag();
 	}));
 
-	context.subscriptions.push(vscode.commands.registerCommand('emmet.mergeLines', () => {
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.mergeLines', () => {
 		mergeLines();
 	}));
 
-	context.subscriptions.push(vscode.commands.registerCommand('emmet.toggleComment', () => {
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.toggleComment', () => {
 		toggleComment();
 	}));
 
-	context.subscriptions.push(vscode.commands.registerCommand('emmet.nextEditPoint', () => {
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.nextEditPoint', () => {
 		fetchEditPoint('next');
 	}));
 
-	context.subscriptions.push(vscode.commands.registerCommand('emmet.prevEditPoint', () => {
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.prevEditPoint', () => {
 		fetchEditPoint('prev');
 	}));
 
-	context.subscriptions.push(vscode.commands.registerCommand('emmet.selectNextItem', () => {
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.selectNextItem', () => {
 		fetchSelectItem('next');
 	}));
 
-	context.subscriptions.push(vscode.commands.registerCommand('emmet.selectPrevItem', () => {
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.selectPrevItem', () => {
 		fetchSelectItem('prev');
 	}));
 
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.evaluateMathExpression', () => {
+		evaluateMathExpression();
+	}));
+
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.incrementNumberByOneTenth', () => {
+		return incrementDecrement(0.1);
+	}));
+
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.incrementNumberByOne', () => {
+		return incrementDecrement(1);
+	}));
+
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.incrementNumberByTen', () => {
+		return incrementDecrement(10);
+	}));
+
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.decrementNumberByOneTenth', () => {
+		return incrementDecrement(-0.1);
+	}));
+
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.decrementNumberByOne', () => {
+		return incrementDecrement(-1);
+	}));
+
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.decrementNumberByTen', () => {
+		return incrementDecrement(-10);
+	}));
+
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.updateImageSize', () => {
+		return updateImageSize();
+	}));
+
+	context.subscriptions.push(vscode.commands.registerCommand('editor.emmet.action.reflectCSSValue', () => {
+		return reflectCssValue();
+	}));
+
+	updateEmmetExtensionsPath();
+
+	context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+		if (e.affectsConfiguration('emmet.includeLanguages')) {
+			registerCompletionProviders(context);
+		}
+		if (e.affectsConfiguration('emmet.extensionsPath')) {
+			updateEmmetExtensionsPath();
+		}
+	}));
+}
+
+/**
+ * Holds any registered completion providers by their language strings
+ */
+const languageMappingForCompletionProviders: Map<string, string> = new Map<string, string>();
+const completionProvidersMapping: Map<string, vscode.Disposable> = new Map<string, vscode.Disposable>();
+
+function registerCompletionProviders(context: vscode.ExtensionContext) {
+	let completionProvider = new DefaultCompletionItemProvider();
+	let includedLanguages = getMappingForIncludedLanguages();
+
+	Object.keys(includedLanguages).forEach(language => {
+		if (languageMappingForCompletionProviders.has(language) && languageMappingForCompletionProviders.get(language) === includedLanguages[language]) {
+			return;
+		}
+
+		if (languageMappingForCompletionProviders.has(language)) {
+			const mapping = completionProvidersMapping.get(language);
+			if (mapping) {
+				mapping.dispose();
+			}
+			languageMappingForCompletionProviders.delete(language);
+			completionProvidersMapping.delete(language);
+		}
+
+		const provider = vscode.languages.registerCompletionItemProvider([{ language, scheme: 'file' }, { language, scheme: 'untitled' }], completionProvider, ...LANGUAGE_MODES[includedLanguages[language]]);
+		context.subscriptions.push(provider);
+
+		languageMappingForCompletionProviders.set(language, includedLanguages[language]);
+		completionProvidersMapping.set(language, provider);
+	});
+
+	Object.keys(LANGUAGE_MODES).forEach(language => {
+		if (!languageMappingForCompletionProviders.has(language)) {
+			const provider = vscode.languages.registerCompletionItemProvider([{ language, scheme: 'file' }, { language, scheme: 'untitled' }], completionProvider, ...LANGUAGE_MODES[language]);
+			context.subscriptions.push(provider);
+
+			languageMappingForCompletionProviders.set(language, language);
+			completionProvidersMapping.set(language, provider);
+		}
+	});
 }
 
 export function deactivate() {

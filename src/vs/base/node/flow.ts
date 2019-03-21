@@ -3,17 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
-import assert = require('assert');
+import * as assert from 'assert';
 
 /**
  * Executes the given function (fn) over the given array of items (list) in parallel and returns the resulting errors and results as
  * array to the callback (callback). The resulting errors and results are evaluated by calling the provided callback function.
  */
-export function parallel<T, E>(list: T[], fn: (item: T, callback: (err: Error, result: E) => void) => void, callback: (err: Error[], result: E[]) => void): void {
-	let results = new Array(list.length);
-	let errors = new Array<Error>(list.length);
+export function parallel<T, E>(list: T[], fn: (item: T, callback: (err: Error | null, result: E | null) => void) => void, callback: (err: Array<Error | null> | null, result: E[]) => void): void {
+	const results = new Array(list.length);
+	const errors = new Array<Error | null>(list.length);
 	let didErrorOccur = false;
 	let doneCount = 0;
 
@@ -44,9 +42,9 @@ export function parallel<T, E>(list: T[], fn: (item: T, callback: (err: Error, r
  * array to the callback (callback). The resulting errors and results are evaluated by calling the provided callback function. The first param can
  * either be a function that returns an array of results to loop in async fashion or be an array of items already.
  */
-export function loop<T, E>(param: (callback: (error: Error, result: T[]) => void) => void, fn: (item: T, callback: (error: Error, result: E) => void, index: number, total: number) => void, callback: (error: Error, result: E[]) => void): void;
-export function loop<T, E>(param: T[], fn: (item: T, callback: (error: Error, result: E) => void, index: number, total: number) => void, callback: (error: Error, result: E[]) => void): void;
-export function loop<E>(param: any, fn: (item: any, callback: (error: Error, result: E) => void, index: number, total: number) => void, callback: (error: Error, result: E[]) => void): void {
+export function loop<T, E>(param: (callback: (error: Error, result: T[]) => void) => void, fn: (item: T, callback: (error: Error | null, result: E | null) => void, index: number, total: number) => void, callback: (error: Error | null, result: E[] | null) => void): void;
+export function loop<T, E>(param: T[], fn: (item: T, callback: (error: Error | null, result: E | null) => void, index: number, total: number) => void, callback: (error: Error | null, result: E[] | null) => void): void;
+export function loop<E>(param: any, fn: (item: any, callback: (error: Error | null, result: E | null) => void, index: number, total: number) => void, callback: (error: Error | null, result: E[] | null) => void): void {
 
 	// Assert
 	assert.ok(param, 'Missing first parameter');
@@ -70,9 +68,9 @@ export function loop<E>(param: any, fn: (item: any, callback: (error: Error, res
 
 	// Expect the param to be an array and loop over it
 	else {
-		let results: E[] = [];
+		const results: E[] = [];
 
-		let looper: (i: number) => void = function (i: number): void {
+		const looper: (i: number) => void = function (i: number): void {
 
 			// Still work to do
 			if (i < param.length) {
@@ -128,11 +126,11 @@ function Sequence(sequences: { (...param: any[]): void; }[]): void {
 	});
 
 	// Execute in Loop
-	let errorHandler = sequences.splice(0, 1)[0]; //Remove error handler
+	const errorHandler = sequences.splice(0, 1)[0]; //Remove error handler
 	let sequenceResult: any = null;
 
 	loop(sequences, (sequence, clb) => {
-		let sequenceFunction = function (error: any, result: any): void {
+		const sequenceFunction = function (error: any, result: any): void {
 
 			// A method might only send a boolean value as return value (e.g. fs.exists), support this case gracefully
 			if (error === true || error === false) {

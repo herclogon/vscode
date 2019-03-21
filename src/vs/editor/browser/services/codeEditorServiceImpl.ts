@@ -2,26 +2,25 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
-import * as strings from 'vs/base/common/strings';
-import URI from 'vs/base/common/uri';
 import * as dom from 'vs/base/browser/dom';
-import {
-	IDecorationRenderOptions, IModelDecorationOptions, IModelDecorationOverviewRulerOptions, IThemeDecorationRenderOptions,
-	IContentDecorationRenderOptions, OverviewRulerLane, TrackedRangeStickiness, ThemeColor, isThemeColor
-} from 'vs/editor/common/editorCommon';
-import { AbstractCodeEditorService } from 'vs/editor/common/services/abstractCodeEditorService';
 import { IDisposable, dispose as disposeAll } from 'vs/base/common/lifecycle';
-import { IThemeService, ITheme } from 'vs/platform/theme/common/themeService';
+import * as strings from 'vs/base/common/strings';
+import { URI } from 'vs/base/common/uri';
+import { ICodeEditor } from 'vs/editor/browser/editorBrowser';
+import { AbstractCodeEditorService } from 'vs/editor/browser/services/abstractCodeEditorService';
+import { IContentDecorationRenderOptions, IDecorationRenderOptions, IThemeDecorationRenderOptions, isThemeColor } from 'vs/editor/common/editorCommon';
+import { IModelDecorationOptions, IModelDecorationOverviewRulerOptions, OverviewRulerLane, TrackedRangeStickiness } from 'vs/editor/common/model';
+import { IResourceInput } from 'vs/platform/editor/common/editor';
+import { ITheme, IThemeService, ThemeColor } from 'vs/platform/theme/common/themeService';
 
-export class CodeEditorServiceImpl extends AbstractCodeEditorService {
+export abstract class CodeEditorServiceImpl extends AbstractCodeEditorService {
 
-	private _styleSheet: HTMLStyleElement;
-	private _decorationOptionProviders: { [key: string]: IModelDecorationOptionsProvider };
-	private _themeService: IThemeService;
+	private readonly _styleSheet: HTMLStyleElement;
+	private readonly _decorationOptionProviders: { [key: string]: IModelDecorationOptionsProvider };
+	private readonly _themeService: IThemeService;
 
-	constructor( @IThemeService themeService: IThemeService, styleSheet = dom.createStyleSheet()) {
+	constructor(@IThemeService themeService: IThemeService, styleSheet = dom.createStyleSheet()) {
 		super();
 		this._styleSheet = styleSheet;
 		this._decorationOptionProviders = Object.create(null);
@@ -31,11 +30,11 @@ export class CodeEditorServiceImpl extends AbstractCodeEditorService {
 	public registerDecorationType(key: string, options: IDecorationRenderOptions, parentTypeKey?: string): void {
 		let provider = this._decorationOptionProviders[key];
 		if (!provider) {
-			let providerArgs: ProviderArguments = {
+			const providerArgs: ProviderArguments = {
 				styleSheet: this._styleSheet,
 				key: key,
 				parentTypeKey: parentTypeKey,
-				options: options
+				options: options || Object.create(null)
 			};
 			if (!parentTypeKey) {
 				provider = new DecorationTypeOptionsProvider(this._themeService, providerArgs);
@@ -48,7 +47,7 @@ export class CodeEditorServiceImpl extends AbstractCodeEditorService {
 	}
 
 	public removeDecorationType(key: string): void {
-		let provider = this._decorationOptionProviders[key];
+		const provider = this._decorationOptionProviders[key];
 		if (provider) {
 			provider.refCount--;
 			if (provider.refCount <= 0) {
@@ -60,13 +59,15 @@ export class CodeEditorServiceImpl extends AbstractCodeEditorService {
 	}
 
 	public resolveDecorationOptions(decorationTypeKey: string, writable: boolean): IModelDecorationOptions {
-		let provider = this._decorationOptionProviders[decorationTypeKey];
+		const provider = this._decorationOptionProviders[decorationTypeKey];
 		if (!provider) {
 			throw new Error('Unknown decoration type key: ' + decorationTypeKey);
 		}
 		return provider.getOptions(this, writable);
 	}
 
+	abstract getActiveCodeEditor(): ICodeEditor | null;
+	abstract openCodeEditor(input: IResourceInput, source: ICodeEditor | null, sideBySide?: boolean): Promise<ICodeEditor | null>;
 }
 
 interface IModelDecorationOptionsProvider extends IDisposable {
@@ -78,9 +79,9 @@ class DecorationSubTypeOptionsProvider implements IModelDecorationOptionsProvide
 
 	public refCount: number;
 
-	private _parentTypeKey: string;
-	private _beforeContentRules: DecorationCSSRules;
-	private _afterContentRules: DecorationCSSRules;
+	private readonly _parentTypeKey: string | undefined;
+	private _beforeContentRules: DecorationCSSRules | null;
+	private _afterContentRules: DecorationCSSRules | null;
 
 	constructor(themeService: IThemeService, providerArgs: ProviderArguments) {
 		this._parentTypeKey = providerArgs.parentTypeKey;
@@ -91,7 +92,7 @@ class DecorationSubTypeOptionsProvider implements IModelDecorationOptionsProvide
 	}
 
 	public getOptions(codeEditorService: AbstractCodeEditorService, writable: boolean): IModelDecorationOptions {
-		let options = codeEditorService.resolveDecorationOptions(this._parentTypeKey, true);
+		const options = codeEditorService.resolveDecorationOptions(this._parentTypeKey, true);
 		if (this._beforeContentRules) {
 			options.beforeContentClassName = this._beforeContentRules.className;
 		}
@@ -126,40 +127,53 @@ class DecorationTypeOptionsProvider implements IModelDecorationOptionsProvider {
 	private _disposables: IDisposable[];
 	public refCount: number;
 
-	public className: string;
+	public className: string | undefined;
 	public inlineClassName: string;
-	public beforeContentClassName: string;
-	public afterContentClassName: string;
-	public glyphMarginClassName: string;
+	public inlineClassNameAffectsLetterSpacing: boolean;
+	public beforeContentClassName: string | undefined;
+	public afterContentClassName: string | undefined;
+	public glyphMarginClassName: string | undefined;
 	public isWholeLine: boolean;
 	public overviewRuler: IModelDecorationOverviewRulerOptions;
-	public stickiness: TrackedRangeStickiness;
+	public stickiness: TrackedRangeStickiness | undefined;
 
 	constructor(themeService: IThemeService, providerArgs: ProviderArguments) {
 		this.refCount = 0;
 		this._disposables = [];
 
-		let createCSSRules = (type: ModelDecorationCSSRuleType) => {
-			let rules = new DecorationCSSRules(type, providerArgs, themeService);
+		const createCSSRules = (type: ModelDecorationCSSRuleType) => {
+			const rules = new DecorationCSSRules(type, providerArgs, themeService);
+			this._disposables.push(rules);
 			if (rules.hasContent) {
-				this._disposables.push(rules);
 				return rules.className;
 			}
-			return void 0;
+			return undefined;
+		};
+		const createInlineCSSRules = (type: ModelDecorationCSSRuleType) => {
+			const rules = new DecorationCSSRules(type, providerArgs, themeService);
+			this._disposables.push(rules);
+			if (rules.hasContent) {
+				return { className: rules.className, hasLetterSpacing: rules.hasLetterSpacing };
+			}
+			return null;
 		};
 
 		this.className = createCSSRules(ModelDecorationCSSRuleType.ClassName);
-		this.inlineClassName = createCSSRules(ModelDecorationCSSRuleType.InlineClassName);
+		const inlineData = createInlineCSSRules(ModelDecorationCSSRuleType.InlineClassName);
+		if (inlineData) {
+			this.inlineClassName = inlineData.className;
+			this.inlineClassNameAffectsLetterSpacing = inlineData.hasLetterSpacing;
+		}
 		this.beforeContentClassName = createCSSRules(ModelDecorationCSSRuleType.BeforeContentClassName);
 		this.afterContentClassName = createCSSRules(ModelDecorationCSSRuleType.AfterContentClassName);
 		this.glyphMarginClassName = createCSSRules(ModelDecorationCSSRuleType.GlyphMarginClassName);
 
-		let options = providerArgs.options;
+		const options = providerArgs.options;
 		this.isWholeLine = Boolean(options.isWholeLine);
 		this.stickiness = options.rangeBehavior;
 
-		let lightOverviewRulerColor = options.light && options.light.overviewRulerColor || options.overviewRulerColor;
-		let darkOverviewRulerColor = options.dark && options.dark.overviewRulerColor || options.overviewRulerColor;
+		const lightOverviewRulerColor = options.light && options.light.overviewRulerColor || options.overviewRulerColor;
+		const darkOverviewRulerColor = options.dark && options.dark.overviewRulerColor || options.overviewRulerColor;
 		if (
 			typeof lightOverviewRulerColor !== 'undefined'
 			|| typeof darkOverviewRulerColor !== 'undefined'
@@ -194,8 +208,9 @@ class DecorationTypeOptionsProvider implements IModelDecorationOptionsProvider {
 }
 
 
-const _CSS_MAP = {
+const _CSS_MAP: { [prop: string]: string; } = {
 	color: 'color:{0} !important;',
+	opacity: 'opacity:{0};',
 	backgroundColor: 'background-color:{0};',
 
 	outline: 'outline:{0};',
@@ -210,6 +225,8 @@ const _CSS_MAP = {
 	borderStyle: 'border-style:{0};',
 	borderWidth: 'border-width:{0};',
 
+	fontStyle: 'font-style:{0};',
+	fontWeight: 'font-weight:{0};',
 	textDecoration: 'text-decoration:{0};',
 	cursor: 'cursor:{0};',
 	letterSpacing: 'letter-spacing:{0};',
@@ -228,12 +245,13 @@ const _CSS_MAP = {
 class DecorationCSSRules {
 
 	private _theme: ITheme;
-	private _className: string;
-	private _unThemedSelector: string;
+	private readonly _className: string;
+	private readonly _unThemedSelector: string;
 	private _hasContent: boolean;
-	private _ruleType: ModelDecorationCSSRuleType;
-	private _themeListener: IDisposable;
-	private _providerArgs: ProviderArguments;
+	private _hasLetterSpacing: boolean;
+	private readonly _ruleType: ModelDecorationCSSRuleType;
+	private _themeListener: IDisposable | null;
+	private readonly _providerArgs: ProviderArguments;
 	private _usesThemeColors: boolean;
 
 	public constructor(ruleType: ModelDecorationCSSRuleType, providerArgs: ProviderArguments, themeService: IThemeService) {
@@ -242,6 +260,7 @@ class DecorationCSSRules {
 		this._providerArgs = providerArgs;
 		this._usesThemeColors = false;
 		this._hasContent = false;
+		this._hasLetterSpacing = false;
 
 		let className = CSSNameHelper.getClassName(this._providerArgs.key, ruleType);
 		if (this._providerArgs.parentTypeKey) {
@@ -259,6 +278,8 @@ class DecorationCSSRules {
 				this._removeCSS();
 				this._buildCSS();
 			});
+		} else {
+			this._themeListener = null;
 		}
 	}
 
@@ -277,13 +298,17 @@ class DecorationCSSRules {
 		return this._hasContent;
 	}
 
+	public get hasLetterSpacing(): boolean {
+		return this._hasLetterSpacing;
+	}
+
 	public get className(): string {
 		return this._className;
 	}
 
 	private _buildCSS(): void {
-		let options = this._providerArgs.options;
-		let unthemedCSS, lightCSS, darkCSS: string;
+		const options = this._providerArgs.options;
+		let unthemedCSS: string, lightCSS: string, darkCSS: string;
 		switch (this._ruleType) {
 			case ModelDecorationCSSRuleType.ClassName:
 				unthemedCSS = this.getCSSTextForModelDecorationClassName(options);
@@ -313,7 +338,7 @@ class DecorationCSSRules {
 			default:
 				throw new Error('Unknown rule type: ' + this._ruleType);
 		}
-		let sheet = <CSSStyleSheet>this._providerArgs.styleSheet.sheet;
+		const sheet = <CSSStyleSheet>this._providerArgs.styleSheet.sheet;
 
 		let hasContent = false;
 		if (unthemedCSS.length > 0) {
@@ -338,15 +363,13 @@ class DecorationCSSRules {
 	/**
 	 * Build the CSS for decorations styled via `className`.
 	 */
-	private getCSSTextForModelDecorationClassName(opts: IThemeDecorationRenderOptions): string {
+	private getCSSTextForModelDecorationClassName(opts: IThemeDecorationRenderOptions | undefined): string {
 		if (!opts) {
 			return '';
 		}
-		let cssTextArr: string[] = [];
+		const cssTextArr: string[] = [];
 		this.collectCSSText(opts, ['backgroundColor'], cssTextArr);
-		if (this.collectCSSText(opts, ['outline', 'outlineColor'], cssTextArr)) {
-			this.collectCSSText(opts, ['outlineStyle', 'outlineWidth'], cssTextArr);
-		}
+		this.collectCSSText(opts, ['outline', 'outlineColor', 'outlineStyle', 'outlineWidth'], cssTextArr);
 		this.collectBorderSettingsCSSText(opts, cssTextArr);
 		return cssTextArr.join('');
 	}
@@ -354,38 +377,39 @@ class DecorationCSSRules {
 	/**
 	 * Build the CSS for decorations styled via `inlineClassName`.
 	 */
-	private getCSSTextForModelDecorationInlineClassName(opts: IThemeDecorationRenderOptions): string {
+	private getCSSTextForModelDecorationInlineClassName(opts: IThemeDecorationRenderOptions | undefined): string {
 		if (!opts) {
 			return '';
 		}
-		let cssTextArr: string[] = [];
-		this.collectCSSText(opts, ['textDecoration', 'cursor', 'color', 'letterSpacing'], cssTextArr);
+		const cssTextArr: string[] = [];
+		this.collectCSSText(opts, ['fontStyle', 'fontWeight', 'textDecoration', 'cursor', 'color', 'opacity', 'letterSpacing'], cssTextArr);
+		if (opts.letterSpacing) {
+			this._hasLetterSpacing = true;
+		}
 		return cssTextArr.join('');
 	}
 
 	/**
 	 * Build the CSS for decorations styled before or after content.
 	 */
-	private getCSSTextForModelDecorationContentClassName(opts: IContentDecorationRenderOptions): string {
+	private getCSSTextForModelDecorationContentClassName(opts: IContentDecorationRenderOptions | undefined): string {
 		if (!opts) {
 			return '';
 		}
-		let cssTextArr: string[] = [];
+		const cssTextArr: string[] = [];
 
 		if (typeof opts !== 'undefined') {
 			this.collectBorderSettingsCSSText(opts, cssTextArr);
-			if (typeof opts.contentIconPath === 'string') {
-				cssTextArr.push(strings.format(_CSS_MAP.contentIconPath, URI.file(opts.contentIconPath).toString().replace(/'/g, '%27')));
-			} else if (opts.contentIconPath instanceof URI) {
-				cssTextArr.push(strings.format(_CSS_MAP.contentIconPath, opts.contentIconPath.toString(true).replace(/'/g, '%27')));
+			if (typeof opts.contentIconPath !== 'undefined') {
+				cssTextArr.push(strings.format(_CSS_MAP.contentIconPath, URI.revive(opts.contentIconPath).toString(true).replace(/'/g, '%27')));
 			}
 			if (typeof opts.contentText === 'string') {
-				const truncated = opts.contentText.match(/^.*$/m)[0]; // only take first line
+				const truncated = opts.contentText.match(/^.*$/m)![0]; // only take first line
 				const escaped = truncated.replace(/['\\]/g, '\\$&');
 
 				cssTextArr.push(strings.format(_CSS_MAP.contentText, escaped));
 			}
-			this.collectCSSText(opts, ['textDecoration', 'color', 'backgroundColor', 'margin'], cssTextArr);
+			this.collectCSSText(opts, ['fontStyle', 'fontWeight', 'textDecoration', 'color', 'opacity', 'backgroundColor', 'margin'], cssTextArr);
 			if (this.collectCSSText(opts, ['width', 'height'], cssTextArr)) {
 				cssTextArr.push('display:inline-block;');
 			}
@@ -397,18 +421,14 @@ class DecorationCSSRules {
 	/**
 	 * Build the CSS for decorations styled via `glpyhMarginClassName`.
 	 */
-	private getCSSTextForModelDecorationGlyphMarginClassName(opts: IThemeDecorationRenderOptions): string {
+	private getCSSTextForModelDecorationGlyphMarginClassName(opts: IThemeDecorationRenderOptions | undefined): string {
 		if (!opts) {
 			return '';
 		}
-		let cssTextArr = [];
+		const cssTextArr: string[] = [];
 
 		if (typeof opts.gutterIconPath !== 'undefined') {
-			if (typeof opts.gutterIconPath === 'string') {
-				cssTextArr.push(strings.format(_CSS_MAP.gutterIconPath, URI.file(opts.gutterIconPath).toString()));
-			} else {
-				cssTextArr.push(strings.format(_CSS_MAP.gutterIconPath, opts.gutterIconPath.toString(true).replace(/'/g, '%27')));
-			}
+			cssTextArr.push(strings.format(_CSS_MAP.gutterIconPath, URI.revive(opts.gutterIconPath).toString(true).replace(/'/g, '%27')));
 			if (typeof opts.gutterIconSize !== 'undefined') {
 				cssTextArr.push(strings.format(_CSS_MAP.gutterIconSize, opts.gutterIconSize));
 			}
@@ -418,8 +438,7 @@ class DecorationCSSRules {
 	}
 
 	private collectBorderSettingsCSSText(opts: any, cssTextArr: string[]): boolean {
-		if (this.collectCSSText(opts, ['border', 'borderColor'], cssTextArr)) {
-			this.collectCSSText(opts, ['borderRadius', 'borderSpacing', 'borderStyle', 'borderWidth'], cssTextArr);
+		if (this.collectCSSText(opts, ['border', 'borderColor', 'borderRadius', 'borderSpacing', 'borderStyle', 'borderWidth'], cssTextArr)) {
 			cssTextArr.push(strings.format('box-sizing: border-box;'));
 			return true;
 		}
@@ -427,9 +446,9 @@ class DecorationCSSRules {
 	}
 
 	private collectCSSText(opts: any, properties: string[], cssTextArr: string[]): boolean {
-		let lenBefore = cssTextArr.length;
+		const lenBefore = cssTextArr.length;
 		for (let property of properties) {
-			let value = this.resolveValue(opts[property]);
+			const value = this.resolveValue(opts[property]);
 			if (typeof value === 'string') {
 				cssTextArr.push(strings.format(_CSS_MAP[property], value));
 			}
@@ -440,11 +459,11 @@ class DecorationCSSRules {
 	private resolveValue(value: string | ThemeColor): string {
 		if (isThemeColor(value)) {
 			this._usesThemeColors = true;
-			let color = this._theme.getColor(value.id);
+			const color = this._theme.getColor(value.id);
 			if (color) {
 				return color.toString();
 			}
-			return void 0;
+			return 'transparent';
 		}
 		return value;
 	}
@@ -464,7 +483,7 @@ class CSSNameHelper {
 		return 'ced-' + key + '-' + type;
 	}
 
-	public static getSelector(key: string, parentKey: string, ruleType: ModelDecorationCSSRuleType): string {
+	public static getSelector(key: string, parentKey: string | undefined, ruleType: ModelDecorationCSSRuleType): string {
 		let selector = '.monaco-editor .' + this.getClassName(key, ruleType);
 		if (parentKey) {
 			selector = selector + '.' + this.getClassName(parentKey, ruleType);

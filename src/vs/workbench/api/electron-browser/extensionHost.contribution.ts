@@ -3,105 +3,68 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
 import { IWorkbenchContribution, IWorkbenchContributionsRegistry, Extensions as WorkbenchExtensions } from 'vs/workbench/common/contributions';
-import { Registry } from 'vs/platform/platform';
-import { IInstantiationService, IConstructorSignature0 } from 'vs/platform/instantiation/common/instantiation';
-import { IThreadService } from 'vs/workbench/services/thread/common/threadService';
-import { MainContext, InstanceCollection } from '../node/extHost.protocol';
-import { IExtensionService } from 'vs/platform/extensions/common/extensions';
-
-// --- addressable
-import { MainThreadCommands } from './mainThreadCommands';
-import { MainThreadConfiguration } from './mainThreadConfiguration';
-import { MainThreadDiagnostics } from './mainThreadDiagnostics';
-import { MainThreadDocuments } from './mainThreadDocuments';
-import { MainThreadEditors } from './mainThreadEditors';
-import { MainThreadErrors } from './mainThreadErrors';
-import { MainThreadTreeViews } from './mainThreadTreeViews';
-import { MainThreadLanguageFeatures } from './mainThreadLanguageFeatures';
-import { MainThreadLanguages } from './mainThreadLanguages';
-import { MainThreadMessageService } from './mainThreadMessageService';
-import { MainThreadOutputService } from './mainThreadOutputService';
-import { MainThreadProgress } from './mainThreadProgress';
-import { MainThreadQuickOpen } from './mainThreadQuickOpen';
-import { MainThreadStatusBar } from './mainThreadStatusBar';
-import { MainThreadStorage } from './mainThreadStorage';
-import { MainThreadTelemetry } from './mainThreadTelemetry';
-import { MainThreadTerminalService } from './mainThreadTerminalService';
-import { MainThreadWorkspace } from './mainThreadWorkspace';
-import { MainProcessExtensionService } from './mainThreadExtensionService';
-import { MainThreadFileSystemEventService } from './mainThreadFileSystemEventService';
-import { MainThreadTask } from './mainThreadTask';
-import { MainThreadSCM } from './mainThreadSCM';
+import { Registry } from 'vs/platform/registry/common/platform';
+import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
+import { LifecyclePhase } from 'vs/platform/lifecycle/common/lifecycle';
 
 // --- other interested parties
-import { MainThreadDocumentsAndEditors } from './mainThreadDocumentsAndEditors';
-import { JSONValidationExtensionPoint } from 'vs/platform/jsonschemas/common/jsonValidationExtensionPoint';
-import { LanguageConfigurationFileHandler } from 'vs/editor/node/languageConfigurationExtensionPoint';
-import { SaveParticipant } from './mainThreadSaveParticipant';
+import { JSONValidationExtensionPoint } from 'vs/workbench/api/common/jsonValidationExtensionPoint';
+import { ColorExtensionPoint } from 'vs/workbench/services/themes/common/colorExtensionPoint';
+import { LanguageConfigurationFileHandler } from 'vs/workbench/contrib/codeEditor/browser/languageConfigurationExtensionPoint';
 
-// --- registers itself as service
-import './mainThreadHeapService';
+// --- mainThread participants
+import '../browser/mainThreadClipboard';
+import '../browser/mainThreadCommands';
+import '../browser/mainThreadConfiguration';
+import '../browser/mainThreadConsole';
+import '../browser/mainThreadDebugService';
+import '../browser/mainThreadDecorations';
+import '../browser/mainThreadDiagnostics';
+import '../browser/mainThreadDialogs';
+import '../browser/mainThreadDocumentContentProviders';
+import '../browser/mainThreadDocuments';
+import '../browser/mainThreadDocumentsAndEditors';
+import '../browser/mainThreadEditor';
+import '../browser/mainThreadEditors';
+import '../browser/mainThreadErrors';
+import '../browser/mainThreadExtensionService';
+import '../browser/mainThreadFileSystem';
+import '../browser/mainThreadFileSystemEventService';
+import '../browser/mainThreadHeapService';
+import '../browser/mainThreadLanguageFeatures';
+import '../browser/mainThreadLanguages';
+import '../browser/mainThreadLogService';
+import '../browser/mainThreadMessageService';
+import '../browser/mainThreadOutputService';
+import '../browser/mainThreadProgress';
+import '../browser/mainThreadQuickOpen';
+import '../browser/mainThreadSaveParticipant';
+import '../browser/mainThreadSCM';
+import '../browser/mainThreadSearch';
+import '../browser/mainThreadStatusBar';
+import '../browser/mainThreadStorage';
+import '../browser/mainThreadTelemetry';
+import '../browser/mainThreadTerminalService';
+import '../browser/mainThreadTreeViews';
+import '../browser/mainThreadUrls';
+import '../browser/mainThreadWindow';
+import '../browser/mainThreadWorkspace';
+import './mainThreadComments';
+import './mainThreadTask';
+import './mainThreadWebview';
+import 'vs/workbench/api/node/apiCommands';
 
-export class ExtHostContribution implements IWorkbenchContribution {
+export class ExtensionPoints implements IWorkbenchContribution {
 
 	constructor(
-		@IThreadService private threadService: IThreadService,
-		@IInstantiationService private instantiationService: IInstantiationService,
-		@IExtensionService private extensionService: IExtensionService
+		@IInstantiationService private readonly instantiationService: IInstantiationService
 	) {
-		this.initExtensionSystem();
-	}
-
-	public getId(): string {
-		return 'vs.api.extHost';
-	}
-
-	private initExtensionSystem(): void {
-		const create = <T>(ctor: IConstructorSignature0<T>): T => {
-			return this.instantiationService.createInstance(ctor);
-		};
-
-		const documentsAndEditors = this.instantiationService.createInstance(MainThreadDocumentsAndEditors);
-
-		// Addressable instances
-		const col = new InstanceCollection();
-		col.define(MainContext.MainThreadCommands).set(create(MainThreadCommands));
-		col.define(MainContext.MainThreadConfiguration).set(create(MainThreadConfiguration));
-		col.define(MainContext.MainThreadDiagnostics).set(create(MainThreadDiagnostics));
-		col.define(MainContext.MainThreadDocuments).set(this.instantiationService.createInstance(MainThreadDocuments, documentsAndEditors));
-		col.define(MainContext.MainThreadEditors).set(this.instantiationService.createInstance(MainThreadEditors, documentsAndEditors));
-		col.define(MainContext.MainThreadErrors).set(create(MainThreadErrors));
-		col.define(MainContext.MainThreadTreeViews).set(create(MainThreadTreeViews));
-		col.define(MainContext.MainThreadLanguageFeatures).set(create(MainThreadLanguageFeatures));
-		col.define(MainContext.MainThreadLanguages).set(create(MainThreadLanguages));
-		col.define(MainContext.MainThreadMessageService).set(create(MainThreadMessageService));
-		col.define(MainContext.MainThreadOutputService).set(create(MainThreadOutputService));
-		col.define(MainContext.MainThreadProgress).set(create(MainThreadProgress));
-		col.define(MainContext.MainThreadQuickOpen).set(create(MainThreadQuickOpen));
-		col.define(MainContext.MainThreadStatusBar).set(create(MainThreadStatusBar));
-		col.define(MainContext.MainThreadStorage).set(create(MainThreadStorage));
-		col.define(MainContext.MainThreadTelemetry).set(create(MainThreadTelemetry));
-		col.define(MainContext.MainThreadTerminalService).set(create(MainThreadTerminalService));
-		col.define(MainContext.MainThreadWorkspace).set(create(MainThreadWorkspace));
-		col.define(MainContext.MainThreadSCM).set(create(MainThreadSCM));
-		col.define(MainContext.MainThreadTask).set(create(MainThreadTask));
-		if (this.extensionService instanceof MainProcessExtensionService) {
-			col.define(MainContext.MainProcessExtensionService).set(<MainProcessExtensionService>this.extensionService);
-		}
-		col.finish(true, this.threadService);
-
-		// Other interested parties
-		create(JSONValidationExtensionPoint);
+		// Classes that handle extension points...
+		this.instantiationService.createInstance(JSONValidationExtensionPoint);
+		this.instantiationService.createInstance(ColorExtensionPoint);
 		this.instantiationService.createInstance(LanguageConfigurationFileHandler);
-		create(MainThreadFileSystemEventService);
-		create(SaveParticipant);
 	}
 }
 
-// Register File Tracker
-Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).registerWorkbenchContribution(
-	ExtHostContribution
-);
+Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).registerWorkbenchContribution(ExtensionPoints, LifecyclePhase.Starting);

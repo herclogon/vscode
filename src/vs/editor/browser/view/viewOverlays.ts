@@ -2,18 +2,18 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
 import { FastDomNode, createFastDomNode } from 'vs/base/browser/fastDomNode';
-import { IConfiguration } from 'vs/editor/common/editorCommon';
-import { IVisibleLine, VisibleLinesCollection, IVisibleLinesHost } from 'vs/editor/browser/view/viewLayer';
-import { DynamicViewOverlay } from 'vs/editor/browser/view/dynamicViewOverlay';
 import { Configuration } from 'vs/editor/browser/config/configuration';
-import { ViewContext } from 'vs/editor/common/view/viewContext';
-import { RenderingContext, RestrictedRenderingContext } from 'vs/editor/common/view/renderingContext';
-import { ViewportData } from 'vs/editor/common/viewLayout/viewLinesViewportData';
-import * as viewEvents from 'vs/editor/common/view/viewEvents';
+import { DynamicViewOverlay } from 'vs/editor/browser/view/dynamicViewOverlay';
+import { IVisibleLine, IVisibleLinesHost, VisibleLinesCollection } from 'vs/editor/browser/view/viewLayer';
 import { ViewPart } from 'vs/editor/browser/view/viewPart';
+import { IStringBuilder } from 'vs/editor/common/core/stringBuilder';
+import { IConfiguration } from 'vs/editor/common/editorCommon';
+import { RenderingContext, RestrictedRenderingContext } from 'vs/editor/common/view/renderingContext';
+import { ViewContext } from 'vs/editor/common/view/viewContext';
+import * as viewEvents from 'vs/editor/common/view/viewEvents';
+import { ViewportData } from 'vs/editor/common/viewLayout/viewLinesViewportData';
 
 export class ViewOverlays extends ViewPart implements IVisibleLinesHost<ViewOverlayLine> {
 
@@ -40,7 +40,7 @@ export class ViewOverlays extends ViewPart implements IVisibleLinesHost<ViewOver
 		}
 
 		for (let i = 0, len = this._dynamicOverlays.length; i < len; i++) {
-			let dynamicOverlay = this._dynamicOverlays[i];
+			const dynamicOverlay = this._dynamicOverlays[i];
 			if (dynamicOverlay.shouldRender()) {
 				return true;
 			}
@@ -53,10 +53,10 @@ export class ViewOverlays extends ViewPart implements IVisibleLinesHost<ViewOver
 		super.dispose();
 
 		for (let i = 0, len = this._dynamicOverlays.length; i < len; i++) {
-			let dynamicOverlay = this._dynamicOverlays[i];
+			const dynamicOverlay = this._dynamicOverlays[i];
 			dynamicOverlay.dispose();
 		}
-		this._dynamicOverlays = null;
+		this._dynamicOverlays = [];
 	}
 
 	public getDomNode(): FastDomNode<HTMLElement> {
@@ -79,10 +79,10 @@ export class ViewOverlays extends ViewPart implements IVisibleLinesHost<ViewOver
 
 	public onConfigurationChanged(e: viewEvents.ViewConfigurationChangedEvent): boolean {
 		this._visibleLines.onConfigurationChanged(e);
-		let startLineNumber = this._visibleLines.getStartLineNumber();
-		let endLineNumber = this._visibleLines.getEndLineNumber();
+		const startLineNumber = this._visibleLines.getStartLineNumber();
+		const endLineNumber = this._visibleLines.getEndLineNumber();
 		for (let lineNumber = startLineNumber; lineNumber <= endLineNumber; lineNumber++) {
-			let line = this._visibleLines.getVisibleLine(lineNumber);
+			const line = this._visibleLines.getVisibleLine(lineNumber);
 			line.onConfigurationChanged(e);
 		}
 		return true;
@@ -116,15 +116,13 @@ export class ViewOverlays extends ViewPart implements IVisibleLinesHost<ViewOver
 	// ----- end event handlers
 
 	public prepareRender(ctx: RenderingContext): void {
-		let toRender = this._dynamicOverlays.filter(overlay => overlay.shouldRender());
+		const toRender = this._dynamicOverlays.filter(overlay => overlay.shouldRender());
 
 		for (let i = 0, len = toRender.length; i < len; i++) {
-			let dynamicOverlay = toRender[i];
+			const dynamicOverlay = toRender[i];
 			dynamicOverlay.prepareRender(ctx);
 			dynamicOverlay.onDidRender();
 		}
-
-		return null;
 	}
 
 	public render(ctx: RestrictedRenderingContext): void {
@@ -141,10 +139,10 @@ export class ViewOverlays extends ViewPart implements IVisibleLinesHost<ViewOver
 
 export class ViewOverlayLine implements IVisibleLine {
 
-	private _configuration: IConfiguration;
-	private _dynamicOverlays: DynamicViewOverlay[];
-	private _domNode: FastDomNode<HTMLElement>;
-	private _renderedContent: string;
+	private readonly _configuration: IConfiguration;
+	private readonly _dynamicOverlays: DynamicViewOverlay[];
+	private _domNode: FastDomNode<HTMLElement> | null;
+	private _renderedContent: string | null;
 	private _lineHeight: number;
 
 	constructor(configuration: IConfiguration, dynamicOverlays: DynamicViewOverlay[]) {
@@ -156,7 +154,7 @@ export class ViewOverlayLine implements IVisibleLine {
 		this._renderedContent = null;
 	}
 
-	public getDomNode(): HTMLElement {
+	public getDomNode(): HTMLElement | null {
 		if (!this._domNode) {
 			return null;
 		}
@@ -178,21 +176,29 @@ export class ViewOverlayLine implements IVisibleLine {
 		}
 	}
 
-	public renderLine(lineNumber: number, deltaTop: number, viewportData: ViewportData): string {
+	public renderLine(lineNumber: number, deltaTop: number, viewportData: ViewportData, sb: IStringBuilder): boolean {
 		let result = '';
 		for (let i = 0, len = this._dynamicOverlays.length; i < len; i++) {
-			let dynamicOverlay = this._dynamicOverlays[i];
+			const dynamicOverlay = this._dynamicOverlays[i];
 			result += dynamicOverlay.render(viewportData.startLineNumber, lineNumber);
 		}
 
 		if (this._renderedContent === result) {
 			// No rendering needed
-			return null;
+			return false;
 		}
 
 		this._renderedContent = result;
 
-		return `<div style="position:absolute;top:${deltaTop}px;width:100%;height:${this._lineHeight}px;">${result}</div>`;
+		sb.appendASCIIString('<div style="position:absolute;top:');
+		sb.appendASCIIString(String(deltaTop));
+		sb.appendASCIIString('px;width:100%;height:');
+		sb.appendASCIIString(String(this._lineHeight));
+		sb.appendASCIIString('px;">');
+		sb.appendASCIIString(result);
+		sb.appendASCIIString('</div>');
+
+		return true;
 	}
 
 	public layoutLine(lineNumber: number, deltaTop: number): void {
@@ -270,7 +276,7 @@ export class MarginViewOverlays extends ViewOverlays {
 
 	_viewOverlaysRender(ctx: RestrictedRenderingContext): void {
 		super._viewOverlaysRender(ctx);
-		let height = Math.min(ctx.scrollHeight, 1000000);
+		const height = Math.min(ctx.scrollHeight, 1000000);
 		this.domNode.setHeight(height);
 		this.domNode.setWidth(this._contentLeft);
 	}

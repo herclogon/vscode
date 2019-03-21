@@ -4,37 +4,32 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import { validate, isStyleSheet } from './util';
+import { validate, parseDocument, isStyleSheet } from './util';
 import { nextItemHTML, prevItemHTML } from './selectItemHTML';
 import { nextItemStylesheet, prevItemStylesheet } from './selectItemStylesheet';
-import parseStylesheet from '@emmetio/css-parser';
-import parse from '@emmetio/html-matcher';
-import Node from '@emmetio/node';
+import { HtmlNode, CssNode } from 'EmmetNode';
 
 export function fetchSelectItem(direction: string): void {
-	let editor = vscode.window.activeTextEditor;
-	if (!validate()) {
+	if (!validate() || !vscode.window.activeTextEditor) {
+		return;
+	}
+	const editor = vscode.window.activeTextEditor;
+	let rootNode = parseDocument(editor.document);
+	if (!rootNode) {
 		return;
 	}
 
-	let nextItem;
-	let prevItem;
-	let parseContent;
-
-	if (isStyleSheet(editor.document.languageId)) {
-		nextItem = nextItemStylesheet;
-		prevItem = prevItemStylesheet;
-		parseContent = parseStylesheet;
-	} else {
-		nextItem = nextItemHTML;
-		prevItem = prevItemHTML;
-		parseContent = parse;
-	}
-
-	let rootNode: Node = parseContent(editor.document.getText());
 	let newSelections: vscode.Selection[] = [];
 	editor.selections.forEach(selection => {
-		let updatedSelection = direction === 'next' ? nextItem(selection, editor, rootNode) : prevItem(selection, editor, rootNode);
+		const selectionStart = selection.isReversed ? selection.active : selection.anchor;
+		const selectionEnd = selection.isReversed ? selection.anchor : selection.active;
+
+		let updatedSelection;
+		if (isStyleSheet(editor.document.languageId)) {
+			updatedSelection = direction === 'next' ? nextItemStylesheet(selectionStart, selectionEnd, <CssNode>rootNode!) : prevItemStylesheet(selectionStart, selectionEnd, <CssNode>rootNode!);
+		} else {
+			updatedSelection = direction === 'next' ? nextItemHTML(selectionStart, selectionEnd, editor, <HtmlNode>rootNode!) : prevItemHTML(selectionStart, selectionEnd, editor, <HtmlNode>rootNode!);
+		}
 		newSelections.push(updatedSelection ? updatedSelection : selection);
 	});
 	editor.selections = newSelections;
